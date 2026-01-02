@@ -1,6 +1,5 @@
-/* CONTROLENG SCOUT v5.2
-   Author: Gemini & controleng
-   Features: Map Highlights Reading + Smart Bonus Logic
+/* CONTROLENG ADVANCED SCOUT v5.3
+   Author: controleng
    Hosted on GitHub
 */
 
@@ -8,7 +7,7 @@
     /* --- DEĞİŞKENLER --- */
     var excludedVillages = [];
     var selectedBonusTypes = []; 
-    var mapGroups = []; // Harita renklendirme gruplarını tutacak
+    var mapGroups = [];
 
     /* GUI TEMİZLİĞİ */
     if ($('#gemini_scout_gui').length > 0) $('#gemini_scout_gui').remove();
@@ -31,7 +30,7 @@
     ${css}
     <div id="gemini_scout_gui" class="ui-widget-content" style="position:fixed; top:100px; left:50%; margin-left:-250px; width:500px; background: #f4e4bc; border: 3px solid #7d510f; border-radius: 5px; z-index:99999; padding:0; box-shadow: 5px 5px 15px rgba(0,0,0,0.6);">
         <div class="g-header">
-            🛰️ CONTROLENG SCOUT v5.2
+            🛰️ CONTROLENG ADVANCED SCOUT
             <span style="float:right; cursor:pointer;" onclick="$('#gemini_scout_gui').remove()">✖</span>
         </div>
         
@@ -97,7 +96,7 @@
     $('body').append(html);
     $('#gemini_scout_gui').draggable({ handle: ".g-header" });
 
-    /* --- GRUPLARI YÜKLE (HEM OYUN HEM HARİTA GRUPLARI) --- */
+    /* --- GRUPLARI YÜKLE --- */
     fetchGroups();
 
     function fetchGroups() {
@@ -118,9 +117,8 @@
             }
         });
 
-        // 2. Harita Renklendirme Gruplarını Çek (Sizin istediğiniz "Yağma" grubu burada)
+        // 2. Harita Renklendirme Gruplarını Çek
         $.get(TribalWars.buildURL('GET', 'map', {ajaxaction: 'load_for_groups'}), function(data) {
-            // Data HTML tablosu olarak döner, parse etmemiz lazım
             var htmlData = $(data);
             var mapGroupFound = false;
             
@@ -160,7 +158,6 @@
             var id = groupVal.split('_')[1];
 
             if (type === "INGAME") {
-                // Oyun içi grup
                 $.get(TribalWars.buildURL('GET', 'groups', {group_id: id, mode: 'villages'}), function(html) {
                     var regex = /data-village-id="(\d+)"/g;
                     var match;
@@ -171,11 +168,8 @@
                     fetchWorldData();
                 });
             } else if (type === "MAP") {
-                // Harita Renklendirme Grubu (Sizin 'Yağma' klasörü)
-                // Bu grubun köylerini almak için farklı bir API çağrısı lazım
                 UI.SuccessMessage('Harita grubu verisi çözümleniyor...');
                 $.get(TribalWars.buildURL('GET', 'map', {ajaxaction: 'load_for_multiple_villages', group_id: id}), function(json) {
-                    // JSON formatında döner: {villages: [{id: 123, ...}, ...]}
                     if(json.villages) {
                         json.villages.forEach(v => excludedVillages.push(parseInt(v.id)));
                     }
@@ -189,7 +183,9 @@
     };
 
     function fetchWorldData() {
-        UI.SuccessMessage('Uydu taraması başlatılıyor...');
+        UI.SuccessMessage('Uydu verisi (village.txt) indiriliyor...');
+        
+        // Önbellek kontrolü (1 saat)
         if (localStorage.getItem("mapVillageTxt") && (Date.now() - parseInt(localStorage.getItem("mapVillageTime") || 0)) < 3600000) {
             processData(localStorage.getItem("mapVillageTxt"));
         } else {
@@ -208,7 +204,6 @@
         var radius = parseFloat($('#g_radius').val());
         var minP = parseInt($('#g_min_pt').val());
         var maxP = parseInt($('#g_max_pt').val());
-        
         var includeNormal = $('#g_include_normal').is(':checked');
 
         var lines = csv.split(/\r?\n/);
@@ -223,30 +218,19 @@
             var vY = parseInt(row[3]);
             var vPid = parseInt(row[4]); // 0 = Barbar
             var vPts = parseInt(row[5]);
-            var vBonus = parseInt(row[6]); // 0 = Normal, >0 = Bonus
+            var vBonus = parseInt(row[6]); // 0 = Normal
 
             if (vPid === 0) {
-                // 1. Mesafe
                 var dist = Math.sqrt(Math.pow(cX - vX, 2) + Math.pow(cY - vY, 2));
                 if (dist > radius) continue;
-
-                // 2. Puan
                 if (vPts < minP || vPts > maxP) continue;
-
-                // 3. Hariç Tutulanlar
                 if (excludedVillages.includes(vId)) continue;
 
-                // 4. MANTIK (YENİ)
                 var keep = false;
-                
-                // Eğer bonus ise ve seçilenler listesinde varsa
                 if (vBonus > 0) {
-                    if (selectedBonusTypes.length === 0 || selectedBonusTypes.includes(vBonus)) {
-                        keep = true;
-                    }
-                } 
-                // Eğer normal barbar ise ve kutucuk işaretliyse
-                else if (vBonus === 0 && includeNormal) {
+                    if (selectedBonusTypes.length === 0 || selectedBonusTypes.includes(vBonus)) keep = true;
+                    if (selectedBonusTypes.length > 0 && !selectedBonusTypes.includes(vBonus)) keep = false;
+                } else if (vBonus === 0 && includeNormal) {
                     keep = true;
                 }
 
@@ -266,15 +250,12 @@
 
         var outList = found.map(f => f.coord).join(' ');
         var outTable = '<table class="vis" width="100%" style="font-size:11px;"><tr><th>Mesafe</th><th>Koor</th><th>Puan</th><th>Tip</th></tr>';
-        
         var bonusNames = ["-", "Odun", "Kil", "Demir", "Çiftlik", "Kışla", "Ahır", "Atölye", "Tüm", "Depo"];
         var bonusIcons = ["", "wood", "stone", "iron", "farm", "barracks", "stable", "garage", "all", "storage"];
 
         found.forEach(f => {
             var type = "Barbar";
-            if (f.bonus > 0) {
-                type = `<img src="graphic/bonus/${bonusIcons[f.bonus]}.png" width="16"> ${bonusNames[f.bonus]}`;
-            }
+            if (f.bonus > 0) type = `<img src="graphic/bonus/${bonusIcons[f.bonus]}.png" width="16"> ${bonusNames[f.bonus]}`;
             outTable += `<tr><td>${f.dist.toFixed(1)}</td><td><a href="/game.php?screen=info_village&id=${f.id}">${f.coord}</a></td><td>${f.points}</td><td>${type}</td></tr>`;
         });
         outTable += '</table>';
@@ -283,7 +264,6 @@
         $('#g_count').text(found.length);
         $('#g_table_container').html(outTable);
         $('#g_results').show();
-        UI.SuccessMessage(found.length + ' barbar bulundu!');
+        UI.SuccessMessage('Tarama Tamamlandı!');
     }
-
 })();
