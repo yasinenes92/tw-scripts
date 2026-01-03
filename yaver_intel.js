@@ -1,14 +1,14 @@
-/* YAVER'S ULTIMATE INTEL v8.0 (The Scientific Standard)
-   Methodology: Global Percentile + Geometric Mean + Homogeneity Penalty + Bootstrap CI
-   Author: controleng 
+/* YAVER'S ULTIMATE INTEL v9.0 (Detailed Records Edition)
+   Methodology: Global Percentile + Bootstrap CI + Raw Records & Dates
+   Author: controleng & Gemini
    Hosted on GitHub
 */
 
 (function() {
     // --- AYARLAR ---
-    var delayBetweenRequests = 150; // API isteği arası bekleme
-    var bootstrapIterations = 1000; // Simülasyon sayısı
-    var penaltyK = 1.0; // Tutarlılık cezası katsayısı (0.5 - 1.5 arası)
+    var delayBetweenRequests = 150; 
+    var bootstrapIterations = 1000; 
+    var penaltyK = 1.0; 
 
     // --- DEĞİŞKENLER ---
     var targetTribes = [];
@@ -22,14 +22,13 @@
     // --- GUI OLUŞTURMA ---
     var html = `
     <div id="yaver_intel_gui" style="position:fixed; top:50px; left:50%; margin-left:-350px; width:700px; background:#f4e4bc; border:3px solid #7d510f; z-index:99999; padding:10px; box-shadow:0 0 15px rgba(0,0,0,0.6); font-family: Verdana, Arial; font-size:12px;">
-        <h3 style="margin:0; background:#7d510f; color:#fff; padding:8px; text-align:center;">🔬 Yaver'in Nihai Bilimsel Analizi (v8.0)</h3>
+        <h3 style="margin:0; background:#7d510f; color:#fff; padding:8px; text-align:center;">🔬 Yaver'in Nihai Analizi v9.0 (Detaylı)</h3>
         <div id="intel_content" style="padding:15px; text-align:center;">
-            <p><strong>Metodoloji:</strong> Global Percentile Normalizasyonu & Bootstrap Güven Aralığı</p>
+            <p><strong>Metodoloji:</strong> Global Percentile + Kayıtlı Rekorlar</p>
             <ul style="text-align:left; margin-left:100px; font-size:11px;">
-                <li>✅ <strong>Global Referans:</strong> Tüm oyuncular tek havuzda değerlendirilir.</li>
-                <li>✅ <strong>Loot Dengesi:</strong> (Miktar x Sayı) Geometrik Ortalaması.</li>
-                <li>✅ <strong>Tutarlılık Cezası:</strong> Dengesiz klanlar puan kaybeder (k=${penaltyK}).</li>
-                <li>✅ <strong>Bootstrap (CI):</strong> 1000 simülasyon ile %95 güven aralığı.</li>
+                <li>✅ <strong>Bilimsel Skor:</strong> Global Yüzdelik & Bootstrap Güven Aralığı</li>
+                <li>✅ <strong>Kanıt:</strong> Scavenge/Loot Rekor Skorları ve Tarihleri</li>
+                <li>✅ <strong>Analiz:</strong> Hem aktiflik hem verimlilik ölçümü.</li>
             </ul>
             <button class="btn" style="padding:8px 25px; font-weight:bold; font-size:14px;" onclick="startIntelligence()">📡 Analizi Başlat</button>
         </div>
@@ -101,8 +100,10 @@
                         tribeName: tribe.name,
                         points: parseInt(row.find('td:eq(2)').text().replace(/\./g, '').trim()) || 0,
                         lootRes: 0,
+                        lootResDate: "-",
                         lootVil: 0,
-                        scavenge: 0
+                        scavenge: 0,
+                        scavengeDate: "-"
                     });
                 }
             });
@@ -113,7 +114,7 @@
 
     function startPlayerScanning() {
         currentMemberIndex = 0;
-        log("Global Havuz: " + allPlayersGlobal.length + " oyuncu taramaya alınıyor...");
+        log("Global Havuz: " + allPlayersGlobal.length + " oyuncu taranıyor...");
         processPlayerMetrics();
     }
 
@@ -132,9 +133,19 @@
         var p3 = $.get("/game.php?screen=ranking&mode=in_a_day&type=scavenge&name=" + encodeURIComponent(player.name));
 
         $.when(p1, p2, p3).done(function(r1, r2, r3) {
-            player.lootRes = parseScore(r1[0], player.name);
-            player.lootVil = parseScore(r2[0], player.name);
-            player.scavenge = parseScore(r3[0], player.name);
+            // Ham veri ve tarihleri çek
+            var lResData = parseScore(r1[0], player.name);
+            var lVilData = parseScore(r2[0], player.name);
+            var scavData = parseScore(r3[0], player.name);
+
+            player.lootRes = lResData.score;
+            player.lootResDate = lResData.date;
+            
+            player.lootVil = lVilData.score;
+            
+            player.scavenge = scavData.score;
+            player.scavengeDate = scavData.date;
+
             currentMemberIndex++;
             setTimeout(processPlayerMetrics, delayBetweenRequests);
         }).fail(function() {
@@ -147,55 +158,48 @@
     function parseScore(htmlData, playerName) {
         var html = $(htmlData);
         var rows = html.find("#in_a_day_ranking_table tr:gt(0)");
-        var score = 0;
+        var result = { score: 0, date: "-" };
+        
         rows.each(function() {
             var row = $(this);
             if (row.find("td:eq(1)").text().trim() === playerName) {
-                score = parseInt(row.find("td:eq(3)").text().trim().replace(/\./g, '')) || 0;
+                // Sütun 3: Skor, Sütun 4: Tarih
+                result.score = parseInt(row.find("td:eq(3)").text().trim().replace(/\./g, '')) || 0;
+                result.date = row.find("td:eq(4)").text().trim();
                 return false;
             }
         });
-        return score;
+        return result;
     }
 
-    // --- MATEMATİKSEL MOTOR (THE CORE) ---
+    // --- MATEMATİKSEL MOTOR ---
     function performScientificAnalysis() {
-        $('#intel_status_text').text("Global Percentile & Bootstrap Simülasyonu...");
-        log("İstatistik motoru çalıştırılıyor...");
-
-        // 1. Veri Hazırlığı (Sıralı Diziler)
+        $('#intel_status_text').text("Bilimsel Hesaplama Yapılıyor...");
+        
         var pointsArr = allPlayersGlobal.map(p => p.points).sort((a,b) => a-b);
         var scavArr = allPlayersGlobal.map(p => p.scavenge).sort((a,b) => a-b);
         var lootResArr = allPlayersGlobal.map(p => p.lootRes).sort((a,b) => a-b);
         var lootVilArr = allPlayersGlobal.map(p => p.lootVil).sort((a,b) => a-b);
 
-        // 2. Oyuncu Bazlı Metrikler
         allPlayersGlobal.forEach(p => {
-            // Percentiles (Midrank)
             var p_R = getPercentile(p.points, pointsArr);
             var p_S = getPercentile(p.scavenge, scavArr);
             var p_LA = getPercentile(p.lootRes, lootResArr);
             var p_LC = getPercentile(p.lootVil, lootVilArr);
 
-            // Loot Composite (Geometrik Ort)
             var p_L = Math.sqrt(p_LA * p_LC);
-
-            // Ağırlık (Weight)
             var w = 0.5 + (0.5 * p_R);
 
             p.metrics = { p_S: p_S, p_L: p_L, w: w, p_R: p_R };
         });
 
-        // 3. Klan Bazlı Toplamalar ve Bootstrap
         var tribeStats = [];
         targetTribes.forEach(t => {
             var members = allPlayersGlobal.filter(p => p.tribeId === t.id);
             if (members.length === 0) return;
 
-            // A) Ham Skorlar (Weighted Mean)
             var raw = calculateWeightedScores(members);
             
-            // B) Tutarlılık Cezası (Homogeneity Penalty)
             var sd_S = getStandardDeviation(members.map(m => m.metrics.p_S));
             var sd_L = getStandardDeviation(members.map(m => m.metrics.p_L));
             
@@ -203,24 +207,21 @@
             var P_L_adj = raw.P_L * Math.exp(-penaltyK * sd_L);
             var P_K_adj = 100 * Math.sqrt((P_S_adj/100) * (P_L_adj/100));
 
-            // C) Bootstrap Güven Aralığı (CI)
             var bootResults = runBootstrap(members, bootstrapIterations);
 
             tribeStats.push({
                 name: t.name,
                 members: members,
-                raw: raw,
                 adj: { S: P_S_adj, L: P_L_adj, K: P_K_adj },
                 ci: bootResults
             });
         });
 
-        // Sıralama (Karma Skora göre)
         tribeStats.sort((a,b) => b.adj.K - a.adj.K);
         generateFinalReport(tribeStats);
     }
 
-    // --- MATEMATİK YARDIMCILARI ---
+    // --- YARDIMCILAR ---
     function getPercentile(val, arr) {
         var n = arr.length;
         var less = 0, eq = 0;
@@ -239,10 +240,7 @@
             sumL += (m.metrics.w * m.metrics.p_L);
         });
         if (sumW === 0) return { P_S: 0, P_L: 0 };
-        return {
-            P_S: 100 * (sumS / sumW),
-            P_L: 100 * (sumL / sumW)
-        };
+        return { P_S: 100 * (sumS / sumW), P_L: 100 * (sumL / sumW) };
     }
 
     function getStandardDeviation(arr) {
@@ -256,32 +254,25 @@
     function runBootstrap(members, iterations) {
         var karmaSamples = [];
         var n = members.length;
-        
         for(var i=0; i<iterations; i++) {
-            // Resample with replacement
             var sample = [];
-            for(var j=0; j<n; j++) {
-                sample.push(members[Math.floor(Math.random() * n)]);
-            }
+            for(var j=0; j<n; j++) sample.push(members[Math.floor(Math.random() * n)]);
             
-            // Calculate scores for sample
             var res = calculateWeightedScores(sample);
-            // Apply Penalty (using sample SD)
             var sd_S = getStandardDeviation(sample.map(m => m.metrics.p_S));
             var sd_L = getStandardDeviation(sample.map(m => m.metrics.p_L));
             
             var S_adj = res.P_S * Math.exp(-penaltyK * sd_S);
             var L_adj = res.P_L * Math.exp(-penaltyK * sd_L);
             var K_adj = 100 * Math.sqrt((S_adj/100) * (L_adj/100));
-            
             karmaSamples.push(K_adj);
         }
-        
         karmaSamples.sort((a,b) => a-b);
-        var lower = karmaSamples[Math.floor(iterations * 0.025)];
-        var upper = karmaSamples[Math.floor(iterations * 0.975)];
-        
-        return { lower: lower.toFixed(1), upper: upper.toFixed(1) };
+        return { lower: karmaSamples[Math.floor(iterations * 0.025)].toFixed(1), upper: karmaSamples[Math.floor(iterations * 0.975)].toFixed(1) };
+    }
+
+    function numFmt(num) {
+        return num.toString().replace(/\B(?=(\d{3})+(?!\d))/g, ".");
     }
 
     // --- RAPORLAMA ---
@@ -289,41 +280,40 @@
         var d = new Date();
         var dateStr = d.getDate() + "/" + (d.getMonth()+1);
         var output = "[b][size=14]🔬 Yaver'in Nihai Bilimsel Raporu (" + dateStr + ")[/size][/b]\n";
-        output += "[i]Methodology: Global Percentile, Geometric Mean, Homogeneity Penalty, Bootstrap CI (95%)[/i]\n\n";
+        output += "[i]Methodology: Global Percentile, GeoMean, Bootstrap CI (95%)[/i]\n\n";
 
-        // 1. ÖZET TABLO
         output += "[b]🏆 KLAN PERFORMANS ENDEKSİ (0-100)[/b]\n";
-        output += "[table]\n[**]Sıra[||]Klan[||]Scavenge (Adj)[||]Loot (Adj)[||]KARMA (CI 95%)[/**]\n";
-
+        output += "[table]\n[**]Sıra[||]Klan[||]Scavenge[||]Loot[||]KARMA (Güven Aralığı)[/**]\n";
         stats.forEach((s, i) => {
             output += `[*] ${i+1} [|] ${s.name} [|] ${s.adj.S.toFixed(1)} [|] ${s.adj.L.toFixed(1)} [|] [b]${s.adj.K.toFixed(1)}[/b] (CI: ${s.ci.lower}-${s.ci.upper})\n`;
         });
         output += "[/table]\n\n";
         output += "--------------------------------------------------\n\n";
 
-        // 2. DETAYLI OYUNCU ANALİZİ
         stats.forEach(s => {
             output += `[b][size=12]🛡️ ${s.name}[/size][/b]\n`;
             
-            // Üyeleri Karma Güce göre sırala (Raw Percentile Mean)
+            // Sıralama: Karma Yüzdeliğe göre
             s.members.sort((a,b) => {
                 var scoreA = Math.sqrt(a.metrics.p_S * a.metrics.p_L);
                 var scoreB = Math.sqrt(b.metrics.p_S * b.metrics.p_L);
                 return scoreB - scoreA;
             });
 
-            output += `[spoiler=📂 Oyuncu Detayları]\n`;
-            output += `[table]\n[**]Oyuncu[||]Puan (Rank %)[||]Scav %[||]Loot % (Geo)[||]Karma %[/**]\n`;
+            output += `[spoiler=📂 Oyuncu Detayları & Rekorlar]\n`;
+            // YENİ SÜTUNLAR EKLENDİ
+            output += `[table]\n[**]Oyuncu[||]Puan (Rank %)[||]Scavenge (Rekor/Tarih)[||]Loot (Rekor/Tarih)[||]Karma %[/**]\n`;
             
             s.members.forEach(m => {
-                // Sadece aktifleri göster
                 if (m.points > 0 && (m.metrics.p_S > 0.01 || m.metrics.p_L > 0.01)) {
                     var rankP = (m.metrics.p_R * 100).toFixed(0);
-                    var scavP = (m.metrics.p_S * 100).toFixed(1);
-                    var lootP = (m.metrics.p_L * 100).toFixed(1);
                     var karmaP = (Math.sqrt(m.metrics.p_S * m.metrics.p_L) * 100).toFixed(1);
+                    
+                    // Rekorların Formatlanması
+                    var scavDisplay = m.scavenge > 0 ? `${numFmt(m.scavenge)} (${m.scavengeDate})` : "-";
+                    var lootDisplay = m.lootRes > 0 ? `${numFmt(m.lootRes)} (${m.lootResDate})` : "-";
 
-                    output += `[*] [player]${m.name}[/player] [|] ${numFmt(m.points)} (${rankP}%) [|] ${scavP} [|] ${lootP} [|] [b]${karmaP}[/b]\n`;
+                    output += `[*] [player]${m.name}[/player] [|] ${numFmt(m.points)} (${rankP}%) [|] ${scavDisplay} [|] ${lootDisplay} [|] [b]${karmaP}[/b]\n`;
                 }
             });
             output += `[/table]\n[/spoiler]\n\n`;
@@ -331,9 +321,5 @@
 
         Dialog.show("Nihai Rapor", '<textarea cols="80" rows="30" onclick="this.select()">' + output + '</textarea>');
         $('#yaver_intel_gui').remove();
-    }
-
-    function numFmt(num) {
-        return num.toString().replace(/\B(?=(\d{3})+(?!\d))/g, ".");
     }
 })();
