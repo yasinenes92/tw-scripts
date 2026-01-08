@@ -25,13 +25,20 @@
   }
   function safeNum(x) { var n = Number(x); return isFinite(n) ? n : null; }
 
+  // VERİYİ SAYFA KAYNAĞINDAN ÇEKEN YENİ FONKSİYON
   function findCtorArgs() {
     var scripts = document.getElementsByTagName('script');
     for (var i = 0; i < scripts.length; i++) {
       var t = scripts[i].textContent || scripts[i].innerHTML;
       if (!t || t.indexOf('new ScavengeMassScreen') === -1) continue;
+      // Regex ile parantez içindeki argümanları yakala
       var m = t.match(/new\s+ScavengeMassScreen\(\s*([\s\S]*?)\s*\)\s*;/);
-      if (m && m[1]) { try { return new Function('return [' + m[1] + '];')(); } catch (e) {} }
+      if (m && m[1]) { 
+          try { 
+              // String halindeki veriyi gerçek objeye çevir
+              return new Function('return [' + m[1] + '];')(); 
+          } catch (e) { console.error("Veri parse hatası:", e); } 
+      }
     }
     return null;
   }
@@ -44,7 +51,7 @@
       duration_factor: DEFAULTS.duration_factor,
       unitCarry: JSON.parse(JSON.stringify(DEFAULTS.unitCarry))
     };
-    var args = findCtorArgs();
+    var args = findCtorArgs(); // Veriyi kaynaktan çek
     if (args && args.length >= 2) {
       var options = args[0], units = args[1];
       for (var id = 1; id <= 4; id++) {
@@ -90,10 +97,29 @@
   }
 
   function buildPlan(cfg) {
-    if (!window.ScavengeMassScreen || !ScavengeMassScreen.village_data) return { ok: false, error: 'ScavengeMassScreen verisi yok. Sayfayı yenileyin.' };
+    // BURASI DEĞİŞTİ: Artık global değişkene muhtaç değiliz
+    var villagesObj = null;
+
+    // 1. Önce globali dene (eski usul)
+    if (window.ScavengeMassScreen && ScavengeMassScreen.village_data) {
+        villagesObj = ScavengeMassScreen.village_data;
+    } 
+    // 2. Yoksa, kaynak koddan çektiğimiz veriyi kullan (YENİ YÖNTEM)
+    else {
+        var args = findCtorArgs();
+        if(args && args[3]) { // 3. argüman genellikle village verisidir
+            var villageList = args[3];
+            villagesObj = {};
+            // Listeyi objeye çevir (ID bazlı)
+            for(var i=0; i<villageList.length; i++) {
+                villagesObj[villageList[i].village_id] = villageList[i];
+            }
+        }
+    }
+
+    if (!villagesObj) return { ok: false, error: 'Köy verileri okunamadı! (Regex başarısız)' };
 
     var targetSec = SETTINGS.targetHours * 3600;
-    var villagesObj = ScavengeMassScreen.village_data;
     var squadRequests = [];
     var summaryLines = [];
 
