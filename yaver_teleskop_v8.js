@@ -439,17 +439,7 @@
     s += `[/list]\n\n`;
   }
 
-  // TWStats Snapshot
-  if (tw && tw.snapshot && Array.isArray(tw.snapshot) && tw.snapshot.length) {
-    s += `[b]TWStats Snapshot[/b]\n`;
-    s += `[table]\n[**]Key[||]Value[/**]\n`;
-    for (const row of tw.snapshot) {
-      s += `[*]${row.key}[|]${row.value}\n`;
-    }
-    s += `[/table]\n\n`;
-  }
-
-  // TWStats History (ONLY ONE TABLE)
+  // TWStats History (single table only)
   if (tw && tw.history && tw.history.length) {
     s += `[b]TWStats History (last ${Math.min(CFG.maxDays, tw.history.length)} days)[/b]\n`;
     s += `[table]\n[**]Date[||]Points Δ[||]Villages Δ[||]OD Δ[/**]\n`;
@@ -462,6 +452,7 @@
   s += `[/quote]`;
   return s;
 }
+
 
 
 
