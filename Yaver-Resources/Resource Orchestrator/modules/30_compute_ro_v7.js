@@ -1,6 +1,6 @@
 (function () {
   "use strict";
-  var Y = window.__YAVER_RESOURCE_ORCHESTRATOR_V6__;
+  var Y = window.__YAVER_RESOURCE_ORCHESTRATOR_V7__;
   if (!Y) return;
 
   function groupNameById(id) {
@@ -202,10 +202,6 @@
     return (v.base[key] + v.inc[key] + v.inP[key] - v.outP[key]) || 0;
   }
 
-  function effFutureTotal(v) {
-    return effFuture(v, "wood") + effFuture(v, "stone") + effFuture(v, "iron");
-  }
-
   function canSendNow(v, key) {
     // cannot go below keepEach
     return Math.max(0, (v.base[key] || 0) - (v.keepEach || 0));
@@ -221,21 +217,9 @@
     return v.outTo.get(toId);
   }
 
-  function merchantsUsedForOutTo(rec) {
-    return Y.util.merchNeeded(rec.total);
-  }
-
-  function merchantsLeftIfAdd(v, toId, addTotal) {
-    var rec = getOutTo(v, toId);
-    var oldMerch = merchantsUsedForOutTo(rec);
-    var newMerch = Y.util.merchNeeded(rec.total + addTotal);
-    var delta = newMerch - oldMerch;
-    return v.merchantsAvail - delta;
-  }
-
   function maxExtraTotalAllowed(v, toId) {
     var rec = getOutTo(v, toId);
-    var oldMerch = merchantsUsedForOutTo(rec);
+    var oldMerch = Y.util.merchNeeded(rec.total);
     var maxTotal = (oldMerch + v.merchantsAvail) * Y.cfg.MERCHANT_CAP_PER;
     return Math.max(0, maxTotal - rec.total);
   }
@@ -266,12 +250,13 @@
     vTo.inP[resKey] += amount;
 
     var rec = getOutTo(vFrom, vTo.id);
+    var oldTotal = rec.total;
     rec[resKey] += amount;
     rec.total += amount;
     if (tag) rec.tags.add(tag);
 
     // update merchantsAvail by delta of ceil totals
-    var oldMerch = Y.util.merchNeeded(rec.total - amount);
+    var oldMerch = Y.util.merchNeeded(oldTotal);
     var newMerch = Y.util.merchNeeded(rec.total);
     var delta = newMerch - oldMerch;
     vFrom.merchantsAvail -= delta;
@@ -281,7 +266,6 @@
   }
 
   function buildShipmentsFromStates(statesMap) {
-    // statesMap: Map(fromId -> state) where state.outTo has aggregated totals
     var shipments = [];
     statesMap.forEach(function (from) {
       from.outTo.forEach(function (rec, toId) {
@@ -291,7 +275,7 @@
           fromId: from.id,
           fromName: from.name,
           toId: toId,
-          toName: "", // fill later from lookup
+          toName: "",
           toCoord: "",
           wood: rec.wood || 0,
           stone: rec.stone || 0,
@@ -390,7 +374,7 @@
     // totals for tri-balance target (use EFFECTIVE for target)
     var totTargetEff = sumEff(listTarget);
 
-    // sender sendable totals (use BASE for constraints; effective only affects target planning indirectly)
+    // sender sendable totals (use BASE for constraints)
     var senderSendable = { wood: 0, stone: 0, iron: 0 };
     for (var iS = 0; iS < listSender.length; iS++) {
       var s = listSender[iS];
@@ -400,7 +384,6 @@
       senderSendable.iron += Math.max(0, s.base.iron - keepEach);
     }
 
-    // available totals for achieving balance in target
     var Wmax = totTargetEff.wood + ((mode === "balance") ? 0 : senderSendable.wood);
     var Cmax = totTargetEff.stone + ((mode === "balance") ? 0 : senderSendable.stone);
     var Imax = totTargetEff.iron + ((mode === "balance") ? 0 : senderSendable.iron);
@@ -421,7 +404,7 @@
     for (var i2 = 0; i2 < listSender.length; i2++) stSender.set(listSender[i2].id, mkState(listSender[i2], 1.0, reservePct));
     for (var i3 = 0; i3 < listSurplus.length; i3++) stSurplus.set(listSurplus[i3].id, mkState(listSurplus[i3], surplusCapPct, 0));
 
-    // order: bottleneck-first
+    // bottleneck-first order
     var order = [
       { k: "wood", a: Wmax },
       { k: "stone", a: Cmax },
@@ -431,7 +414,6 @@
     var warnings = [];
 
     function planInternalTarget(resKey) {
-      // donors/receivers by EFFECTIVE FUTURE, but send limited by BASE+merchants
       var donors = [];
       var receivers = [];
 
@@ -461,10 +443,8 @@
         d.amt -= sent;
         r.amt -= sent;
 
-        if (sent <= 0) {
-          // cannot send due to merchants/cap/keep => move donor
-          di++;
-        } else {
+        if (sent <= 0) di++;
+        else {
           if (d.amt <= 0.5) di++;
           if (r.amt <= 0.5) ri++;
         }
@@ -499,7 +479,6 @@
         if (r.amt <= 0) { ri++; continue; }
 
         var amt = Math.min(d.amt, r.amt);
-        // sender -> target (receiver cap applies, donor keep applies)
         var sent = applySend(d.v, r.v, resKey, amt, "SND_TO_TGT");
         d.amt -= sent;
         r.amt -= sent;
@@ -513,7 +492,6 @@
     }
 
     function planTargetToSurplus(resKey) {
-      // route only what is "real-sendable" now (base) and is still surplus in effective future
       var donors = [];
       var receivers = [];
 
@@ -528,7 +506,6 @@
       });
 
       stSurplus.forEach(function (v) {
-        // allow filling up to its cap
         var space = capSpace(v, resKey);
         if (space > 0.5) receivers.push({ v: v, amt: space });
       });
@@ -555,14 +532,12 @@
       }
     }
 
-    // Phase 1
+    // phases
     for (var oi = 0; oi < order.length; oi++) planInternalTarget(order[oi]);
-    // Phase 2
     for (var oi2 = 0; oi2 < order.length; oi2++) planSenderToTarget(order[oi2]);
-    // Phase 3 (reverse to push abundant first)
     for (var oi3 = order.length - 1; oi3 >= 0; oi3--) planTargetToSurplus(order[oi3]);
 
-    // warnings: missing in target
+    // warnings
     ["wood", "stone", "iron"].forEach(function (rk) {
       var miss = 0;
       stTarget.forEach(function (v) {
@@ -572,25 +547,13 @@
       if (miss > 0.5) warnings.push("Target still missing " + rk + ": " + Y.util.n(Math.floor(miss)));
     });
 
-    // warnings: surplus not routed (still excess but base cannot export)
-    ["wood", "stone", "iron"].forEach(function (rk) {
-      var left = 0;
-      stTarget.forEach(function (v) {
-        var b = bMap.get(v.id) || 0;
-        left += Math.max(0, effFuture(v, rk) - b);
-      });
-      if (left > 0.5) warnings.push("Surplus remaining (not necessarily sendable now) " + rk + ": " + Y.util.n(Math.floor(left)));
-    });
-
-    // build shipments list from all sending states (target + sender)
+    // build shipments
     var ship = [];
     ship = ship.concat(buildShipmentsFromStates(stTarget));
     ship = ship.concat(buildShipmentsFromStates(stSender));
 
-    // fill toName/coord
     fillToInfo(ship, allMap);
 
-    // snapshots
     var targetSnap = snapshot(listTarget, stTarget, capPct);
     var senderSnap = snapshot(listSender, stSender, 1.0);
     var surplusSnap = snapshot(listSurplus, stSurplus, surplusCapPct);

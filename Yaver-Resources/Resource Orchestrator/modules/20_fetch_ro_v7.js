@@ -1,16 +1,10 @@
 (function () {
   "use strict";
-
-  var Y = window.__YAVER_RESOURCE_ORCHESTRATOR_V2__;
+  var Y = window.__YAVER_RESOURCE_ORCHESTRATOR_V7__;
   if (!Y) return;
 
   function ajaxGet(url) {
-    var x = $.ajax({
-      url: url,
-      method: "GET",
-      cache: false,
-      timeout: 30000
-    });
+    var x = $.ajax({ url: url, method: "GET", cache: false, timeout: 30000 });
     Y._xhr.push(x);
     return new Promise(function (res, rej) {
       x.done(function (data) { res(String(data || "")); })
@@ -27,34 +21,47 @@
     var out = [{ id: 0, name: "All villages" }];
     var items = doc.querySelectorAll(Y.data.SELECTORS.groupMenuItems);
     var seen = new Set([0]);
-
     for (var i = 0; i < items.length; i++) {
       var el = items[i];
       var id = parseInt(el.getAttribute("data-group-id"), 10);
       if (!isFinite(id)) continue;
-
       var name = (el.textContent || "").replace(/\[|\]/g, "").trim();
       if (!name) continue;
-
       if (seen.has(id)) continue;
       seen.add(id);
       if (id !== 0) out.push({ id: id, name: name });
     }
-
     out.sort(function (a, b) { return (a.id || 0) - (b.id || 0); });
     return out;
+  }
+
+  function findMerchTextFromRow(tr) {
+    try {
+      var tds = tr.querySelectorAll("td");
+      for (var i = 0; i < tds.length; i++) {
+        var td = tds[i];
+        if (!td) continue;
+        if ((td.innerHTML || "").indexOf("screen=market") !== -1) {
+          var txt = (td.textContent || "").trim();
+          if (txt) return txt;
+        }
+      }
+      if (tds && tds.length > 5) return (tds[5].textContent || "").trim();
+      return "0/0";
+    } catch (e) {
+      return "0/0";
+    }
   }
 
   function parseProductionVillages(doc) {
     var table = doc.querySelector(Y.data.SELECTORS.productionTable) || doc;
     var rows = table.querySelectorAll("tr.row_a, tr.row_b, tr.nowrap.row_a, tr.nowrap.row_b");
-
     var list = [];
+
     for (var i = 0; i < rows.length; i++) {
       var tr = rows[i];
       var vn = tr.querySelector("span.quickedit-vn[data-id]");
       if (!vn) continue;
-
       var vid = parseInt(vn.getAttribute("data-id"), 10);
       if (!vid) continue;
 
@@ -62,11 +69,13 @@
       var name = nameEl ? (nameEl.textContent || "").trim() : ("village_" + vid);
 
       var tds = tr.querySelectorAll("td");
-      if (!tds || tds.length < 6) continue;
+      if (!tds || tds.length < 4) continue;
 
-      var points = Y.util.toInt(tds[2] ? tds[2].textContent : "0");
+      var points = (tds.length > 2) ? Y.util.toInt(tds[2].textContent || "0") : 0;
 
-      var rcell = tds[3];
+      var rcell = tr.querySelector("td .res.wood") ? tr.querySelector("td .res.wood").closest("td") : null;
+      if (!rcell && tds.length > 3) rcell = tds[3];
+
       var woodEl = rcell ? rcell.querySelector(".res.wood") : null;
       var stoneEl = rcell ? rcell.querySelector(".res.stone") : null;
       var ironEl = rcell ? rcell.querySelector(".res.iron") : null;
@@ -75,9 +84,9 @@
       var stone = Y.util.parseRes(stoneEl ? stoneEl.textContent : "0");
       var iron = Y.util.parseRes(ironEl ? ironEl.textContent : "0");
 
-      var storage = Y.util.parseRes(tds[4] ? tds[4].textContent : "0");
+      var storage = (tds.length > 4) ? Y.util.parseRes(tds[4].textContent || "0") : 0;
 
-      var merchTxt = tds[5] ? tds[5].textContent : "";
+      var merchTxt = findMerchTextFromRow(tr);
       var pair = Y.util.parsePair(merchTxt);
 
       list.push({
@@ -112,8 +121,7 @@
       var tds = tr.querySelectorAll("td");
       if (!tds || tds.length < 4) continue;
 
-      var dirTd = tds[1];
-      var img = dirTd ? dirTd.querySelector("img") : null;
+      var img = tds[1] ? tds[1].querySelector("img") : null;
       var src = img ? (img.getAttribute("src") || "") : "";
       if (src.indexOf("incoming.webp") === -1) continue;
 
@@ -163,24 +171,29 @@
     var cid = findIdByName("children");
     var coin = findIdByName("coin");
 
-    // defaults: Table2 Target=Children, Sender=Parents, Surplus=Parents
     if (pid != null) {
-      if (!Y.state.table2.senderGroupId) Y.state.table2.senderGroupId = pid;
-      if (!Y.state.table2.surplusGroupId) Y.state.table2.surplusGroupId = pid;
+      Y.state.table2.A.surplusGroupId = pid;
+      Y.state.table2.B.senderGroupId = pid;
+      Y.state.table2.B.surplusGroupId = pid;
+      Y.state.table2.C.surplusGroupId = pid;
     }
-    if (cid != null && !Y.state.table2.targetGroupId) Y.state.table2.targetGroupId = cid;
-    // if you prefer Coin as default target later, we can set here.
+    if (cid != null) {
+      Y.state.table2.A.targetGroupId = cid;
+      Y.state.table2.B.targetGroupId = cid;
+    }
+    if (coin != null) {
+      Y.state.table2.C.targetGroupId = coin;
+    }
 
     if (typeof onStep === "function") onStep(1, 3, "Groups detected");
     return true;
   }
 
-  Y.fetch.loadGroup = async function (groupId, onStep) {
+  Y.fetch.loadGroup = async function (groupId, onStep, forceFresh) {
     var gid = groupId == null ? 0 : groupId;
-
     await ensureGroups(onStep);
 
-    if (Y.state.cache.has(gid)) {
+    if (!forceFresh && Y.state.cache.has(gid)) {
       if (typeof onStep === "function") onStep(2, 3, "Group cached");
       return Y.state.cache.get(gid);
     }
@@ -193,7 +206,7 @@
     var htmlT = await ajaxGet(Y.util.urlTraderAll(gid));
     var docT = toDoc(htmlT);
     var incomingRes = parseIncomingTransports(docT);
-    if (typeof onStep === "function") onStep(3, 3, "Incoming resources loaded");
+    if (typeof onStep === "function") onStep(3, 3, "Incoming loaded");
 
     var obj = { villages: villages, incomingRes: incomingRes };
     Y.state.cache.set(gid, obj);
@@ -202,5 +215,29 @@
 
   Y.fetch.clearCache = function () {
     Y.state.cache = new Map();
+  };
+
+  // Execute için taze snapshot (base resources + merchants)
+  Y.fetch.getProdSnapshotFresh = async function () {
+    await ensureGroups();
+    var html = await ajaxGet(Y.util.urlProd(0));
+    var doc = toDoc(html);
+    var villages = parseProductionVillages(doc);
+
+    var m = new Map();
+    for (var i = 0; i < villages.length; i++) {
+      var v = villages[i];
+      m.set(v.id, {
+        id: v.id,
+        name: v.name,
+        wood: v.wood || 0,
+        stone: v.stone || 0,
+        iron: v.iron || 0,
+        storage: v.storage || 0,
+        merchAvail: v.merchAvail || 0,
+        merchTotal: v.merchTotal || 0
+      });
+    }
+    return m;
   };
 })();

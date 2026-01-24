@@ -1,7 +1,6 @@
 (function () {
   "use strict";
-
-  var Y = window.__YAVER_RESOURCE_ORCHESTRATOR_V5__;
+  var Y = window.__YAVER_RESOURCE_ORCHESTRATOR_V7__;
   if (!Y) return;
 
   Y.data.SELECTORS = {
