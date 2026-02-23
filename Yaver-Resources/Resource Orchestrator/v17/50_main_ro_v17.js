@@ -107,14 +107,18 @@
       { text: 'Execute', callback: onYes, confirm: true },
       { text: 'Cancel', callback: function () { try { if (onCancel) onCancel(); } catch (e) {} }, cancel: true },
     ];
-    if (window.UI && UI.ConfirmationBox) UI.ConfirmationBox(htmlMsg, actions, 'yro_exec_v17', true);
-    else {
-      var ok = confirm(htmlMsg.replace(/<br\/>/g, '
-').replace(/<[^>]*>/g, ''));
+    if (window.UI && UI.ConfirmationBox) {
+      UI.ConfirmationBox(htmlMsg, actions, 'yro_exec_v17', true);
+    } else {
+      var plain = String(htmlMsg)
+        .replace(/<br\s*\/?\s*>/gi, '\n')
+        .replace(/<[^>]*>/g, '');
+      var ok = confirm(plain);
       if (ok) onYes();
       else if (onCancel) onCancel();
     }
   }
+
 
 
   function executeTabs() {
