@@ -4,7 +4,7 @@ javascript:(function () {
   // === CONFIG ===
   // Repo yolunu kendine göre güncelle.
   // Örn: .../tw-scripts@main/Yaver-Resources/Resource%20Orchestrator/v18/
-  var BASE = 'https://cdn.jsdelivr.net/gh/yasinenes92/tw-scripts@main/Yaver-Resources/Resource%20Orchestrator/v18/';
+  var BASE = 'https://cdn.jsdelivr.net/gh/yasinenes92/tw-scripts@main/Yaver-Resources/Resource%20Orchestrator/v19/';
   var FILES = [
     '00_bootstrap_ro_v19.js',
     '10_data_ro_v19.js',
