@@ -1,0 +1,1151 @@
+/*
+ * Script Name: Clear Barbarian Walls
+ * Version: v2.0.0
+ * Last Updated: 2026-04-15
+ * Author: RedAlert / Modified for custom wall table + background enter-send flow
+ * Author URL: https://twscripts.dev/
+ * Author Contact: redalert_tw (Discord)
+ * Approved: N/A
+ * Approved Date: 2021-04-21
+ * Mod: JawJaw
+ */
+
+/* Copyright (c) RedAlert
+By uploading a user-generated mod (script) for use with Tribal Wars, you grant InnoGames a perpetual, irrevocable, worldwide, royalty-free, non-exclusive license to use, reproduce, distribute, publicly display, modify, and create derivative works of the mod. This license permits InnoGames to incorporate the mod into any aspect of the game and its related services, including promotional and commercial endeavors, without any requirement for compensation or attribution to you. InnoGames is entitled but not obligated to name you when exercising its rights. You represent and warrant that you have the legal right to grant this license and that the mod does not infringe upon any third-party rights. You are - with the exception of claims of infringement by third parties – not liable for any usage of the mod by InnoGames. German law applies.
+*/
+
+/*
+ javascript:var UNITS_TO_SEND = {
+    1: '&axe=55&ram=5&spy=1',
+    2: '&axe=55&ram=5&spy=1',
+    3: '&axe=65&ram=8&spy=1',
+    4: '&axe=75&ram=10&spy=1',
+    5: '&axe=85&ram=15&spy=1',
+    6: '&axe=100&ram=20&spy=1',
+    7: '&axe=120&ram=25&spy=1',
+    8: '&axe=160&ram=35&spy=1',
+    9: '&axe=180&ram=40&spy=1',
+    10: '&axe=230&ram=50&spy=1',
+    11: '&axe=260&ram=60&spy=1',
+    12: '&axe=280&ram=70&spy=1',
+    13: '&axe=330&ram=80&spy=1',
+    14: '&axe=380&ram=95&spy=1',
+    15: '&axe=440&ram=110&spy=1',
+ };$.getScript('https://cdn.jsdelivr.net/gh/yasinenes92/tw-scripts@main/Clear_Barbarian_Walls_v2.js');
+*/
+
+var scriptData = {
+    name: 'Clear Barbarian Walls',
+    version: 'v2.0.0',
+    author: 'RedAlert',
+    authorUrl: 'https://twscripts.dev/',
+    helpLink:
+        'https://forum.tribalwars.net/index.php?threads/clear-barbarian-walls.286971/',
+};
+
+// User Input
+if (typeof DEBUG !== 'boolean') DEBUG = false; // enable/disable debug mode
+if (typeof UNITS_TO_SEND === 'undefined')
+    UNITS_TO_SEND = {
+        1: '&axe=55&ram=5&spy=1',
+        2: '&axe=55&ram=5&spy=1',
+        3: '&axe=65&ram=8&spy=1',
+        4: '&axe=75&ram=10&spy=1',
+        5: '&axe=85&ram=15&spy=1',
+        6: '&axe=100&ram=20&spy=1',
+        7: '&axe=120&ram=25&spy=1',
+        8: '&axe=160&ram=35&spy=1',
+        9: '&axe=180&ram=40&spy=1',
+        10: '&axe=230&ram=50&spy=1',
+        11: '&axe=260&ram=60&spy=1',
+        12: '&axe=280&ram=70&spy=1',
+        13: '&axe=330&ram=80&spy=1',
+        14: '&axe=380&ram=95&spy=1',
+        15: '&axe=440&ram=110&spy=1',
+    };
+
+// Globals
+var ALLOWED_GAME_SCREENS = ['map']; // list of game screens where script can be executed
+var COORDS_REGEX = /[0-9]{1,3}\|[0-9]{1,3}/g; // regex for coordinates
+var MAX_SUPPORTED_WALL = 15; // maximum wall level to attack
+
+if (typeof TWMap === 'undefined') TWMap = {};
+if ('TWMap' in window) mapOverlay = TWMap;
+
+// Data Store Config
+var STORAGE_KEY = 'RA_CBW_STORE'; // key for sessionStorage
+var DEFAULT_STATE = {
+    MAX_BARBARIANS: 100,
+    MAX_FA_PAGES_TO_FETCH: 20,
+};
+
+// Background send state
+var BACKGROUND_ATTACK_STATE = {
+    enterHeld: false,
+    enterLoopRunning: false,
+    attackBusy: false,
+    stopReason: null,
+};
+
+// Translations
+var translations = {
+    en_DK: {
+        'Clear Barbarian Walls': 'Clear Barbarian Walls',
+        Help: 'Help',
+        'This script requires PA and FA to be active!':
+            'This script requires PA and FA to be active!',
+        'Redirecting...': 'Redirecting...',
+        'Fetching FA pages...': 'Fetching FA pages...',
+        'Finished fetching FA pages!': 'Finished fetching FA pages!',
+        Fetching: 'Fetching',
+        'No barbarian villages found fitting the criteria!':
+            'No barbarian villages found fitting the criteria!',
+        Type: 'Type',
+        Barbarian: 'Barbarian',
+        Report: 'Report',
+        Distance: 'Distance',
+        Wall: 'Wall',
+        'Last Attack Time': 'Last Attack Time',
+        Actions: 'Actions',
+        Attack: 'Attack',
+        'barbarian villages where found': 'barbarian villages where found',
+        'Showing the first': 'Showing the first',
+        'barbarian villages.': 'barbarian villages.',
+        Settings: 'Settings',
+        'Save Settings': 'Save Settings',
+        'Maximum villages to show on the table':
+            'Maximum villages to show on the table',
+        'Maximum FA Pages to fetch': 'Maximum FA Pages to fetch',
+        'Minimum Wall Level': 'Minimum Wall Level',
+        'Settings saved!': 'Settings saved!',
+        'Include reports with partial losses':
+            'Include reports with partial losses',
+    },
+};
+
+// Init Debug
+initDebug();
+
+// Initialize script logic
+async function initClearBarbarianWalls(store) {
+    const { MAX_BARBARIANS, MAX_FA_PAGES_TO_FETCH } = store;
+    const faURLs = await fetchFAPages(MAX_FA_PAGES_TO_FETCH);
+
+    // Show progress bar and notify user
+    startProgressBar(faURLs.length);
+    UI.SuccessMessage(tt('Fetching FA pages...'));
+
+    const faPages = [];
+    jQuery.fetchAll(
+        faURLs,
+        function (index, data) {
+            updateProgressBar(index, faURLs.length);
+            const { plunder_list } = data;
+            faPages.push(...plunder_list);
+        },
+        function () {
+            const faTableRows = getFATableRows(faPages);
+            const barbarians = getFABarbarians(faTableRows);
+
+            const content = prepareContent(barbarians, MAX_BARBARIANS);
+            renderUI(content);
+            jQuery('#barbVillagesCount').text(barbarians.length);
+
+            updateMap(barbarians);
+
+            // event handlers
+            showSettingsPanel(store);
+            bindAttackEventHandlers();
+        },
+        function (error) {
+            UI.ErrorMessage('Error fetching FA pages!');
+            console.error(`${scriptInfo()} Error:`, error);
+        }
+    );
+}
+
+// Update map to include barbarians
+function updateMap(barbarians) {
+    const barbCoords = barbarians.map((barbarian) => barbarian.coord);
+    // Show wall level of barbarian villages on the Map
+    if (mapOverlay.mapHandler._spawnSector) {
+        // exists already, don't recreate
+    } else {
+        // doesn't exist yet
+        mapOverlay.mapHandler._spawnSector = mapOverlay.mapHandler.spawnSector;
+    }
+
+    TWMap.mapHandler.spawnSector = function (data, sector) {
+        // Override Map Sector Spawn
+        mapOverlay.mapHandler._spawnSector(data, sector);
+        var beginX = sector.x - data.x;
+        var endX = beginX + mapOverlay.mapSubSectorSize;
+        var beginY = sector.y - data.y;
+        var endY = beginY + mapOverlay.mapSubSectorSize;
+
+        for (var x in data.tiles) {
+            x = parseInt(x, 10);
+            if (x < beginX || x >= endX) {
+                continue;
+            }
+
+            for (var y in data.tiles[x]) {
+                y = parseInt(y, 10);
+
+                if (y < beginY || y >= endY) {
+                    continue;
+                }
+
+                var xCoord = data.x + x;
+                var yCoord = data.y + y;
+                var v = mapOverlay.villages[xCoord * 1000 + yCoord];
+                if (v) {
+                    var vXY = '' + v.xy;
+                    var vCoords = vXY.slice(0, 3) + '|' + vXY.slice(3, 6);
+                    if (barbCoords.includes(vCoords)) {
+                        const currentBarbarian = barbarians.find(
+                            (obj) => obj.villageId == v.id
+                        );
+
+                        if (!currentBarbarian) continue;
+
+                        const eleDIV = $('<div></div>')
+                            .css({
+                                border: '1px coral solid',
+                                position: 'absolute',
+                                backgroundColor: '#000',
+                                color: '#fff',
+                                width: '30px',
+                                height: '15px',
+                                marginTop: '20px',
+                                marginLeft: '10px',
+                                display: 'block',
+                                zIndex: '10',
+                                fontWeight: 'normal',
+                                textAlign: 'center',
+                            })
+                            .attr('id', 'dsm' + v.id)
+                            .html(currentBarbarian.wall);
+
+                        sector.appendElement(
+                            eleDIV[0],
+                            data.x + x - sector.x,
+                            data.y + y - sector.y
+                        );
+                    }
+                }
+            }
+        }
+    };
+
+    mapOverlay.reload();
+}
+
+// Prepare content
+function prepareContent(villages, maxBarbsToShow) {
+    if (villages.length) {
+        const barbsTable = buildBarbsTable(villages, maxBarbsToShow);
+        var content = `
+			<div>
+				<p>
+					<b><span id="barbVillagesCount"></span> ${tt(
+                        'barbarian villages where found'
+                    )}</b><br>
+					<em>${tt('Showing the first')} ${maxBarbsToShow} ${tt(
+            'barbarian villages.'
+        )}</em>
+				</p>
+			</div>
+			<div class="ra-table-container">
+				${barbsTable}
+			</div>
+		`;
+
+        return content;
+    } else {
+        return `<b>${tt(
+            'No barbarian villages found fitting the criteria!'
+        )}</b>`;
+    }
+}
+
+// Render UI
+function renderUI(body) {
+    const content = `
+        <div class="ra-clear-barbs-walls" id="raClearBarbWalls">
+			<div class="ra-clear-barbs-walls-header">
+				<h3>${tt(scriptData.name)}</h3>
+				<a href="javascript:void(0);" id="showSettingsPanel" class="btn-show-settings">
+					<span class="icon header settings"></span>
+				</a>
+			</div>
+            <div class="ra-clear-barbs-walls-body">
+                ${body}
+            </div>
+			<div class="ra-clear-barbs-walls-footer">
+				<small>
+					<strong>
+						${tt(scriptData.name)} ${scriptData.version}
+					</strong> -
+					<a href="${scriptData.authorUrl}" target="_blank" rel="noreferrer noopener">
+						${scriptData.author}
+					</a> -
+					<a href="${scriptData.helpLink}" target="_blank" rel="noreferrer noopener">
+						${tt('Help')}
+					</a>
+				</small>
+			</div>
+        </div>
+        <style>
+            .ra-clear-barbs-walls { position: relative; display: block; width: 100%; height: auto; clear: both; margin: 10px 0 15px; border: 1px solid #603000; box-sizing: border-box; background: #f4e4bc; }
+            .ra-clear-barbs-walls * { box-sizing: border-box; }
+			.ra-clear-barbs-walls > div { padding: 10px; }
+            .ra-clear-barbs-walls .btn-confirm-yes { padding: 3px; }
+			.ra-clear-barbs-walls-header { display: flex; align-items: center; justify-content: space-between; background-color: #c1a264 !important; background-image: url(/graphic/screen/tableheader_bg3.png); background-repeat: repeat-x; }
+			.ra-clear-barbs-walls-header h3 { margin: 0; padding: 0; line-height: 1; }
+			.ra-clear-barbs-walls-body p { font-size: 14px; }
+            .ra-clear-barbs-walls-body label { display: block; font-weight: 600; margin-bottom: 6px; }
+            
+			/* Table Styling */
+			.ra-table-container { overflow-y: auto; overflow-x: hidden; height: auto; max-height: 312px;border: 1px solid #bc6e1f; }
+			.ra-table th { font-size: 14px; }
+			.ra-table th,
+            .ra-table td { padding: 3px; text-align: center; }
+            .ra-table td a { word-break: break-all; }
+			.ra-table a:focus { color: blue; }
+			.ra-table a.btn:focus { color: #fff; }
+			.ra-table tr:nth-of-type(2n) td { background-color: #f0e2be }
+			.ra-table tr:nth-of-type(2n+1) td { background-color: #fff5da; }
+
+			/* Popup */
+			.ra-popup-content { width: 360px; }
+			.ra-popup-content * { box-sizing: border-box; }
+			.ra-popup-content input[type="text"] { padding: 3px; width: 100%; }
+
+			/* Helpers */
+            .ra-mb15 { margin-bottom: 15px; }
+
+			/* Elements */
+			.already-sent-command { opacity: 0.6; }
+            .ra-clear-barb-wall-btn.is-sending { pointer-events: none; opacity: 0.7; }
+            .ra-clear-barb-wall-btn.is-error { pointer-events: auto; }
+            .ra-row-error td { background-color: #f4c7c7 !important; }
+        </style>
+    `;
+
+    if (jQuery('#raClearBarbWalls').length < 1) {
+        jQuery('#contentContainer').prepend(content);
+    } else {
+        jQuery('.ra-clear-barbs-walls-body').html(body);
+    }
+}
+
+// Action Handlers: Show Settings Panel
+function showSettingsPanel(store) {
+    jQuery('#showSettingsPanel').off('click').on('click', function (e) {
+        e.preventDefault();
+
+        const { MAX_BARBARIANS, MAX_FA_PAGES_TO_FETCH } = store;
+
+        const content = `
+			<div class="ra-popup-content">
+				<div class="ra-popup-header">
+					<h3>${tt('Settings')}</h3>
+				</div>
+				<div class="ra-popup-body ra-mb15">
+					<table class="ra-settings-table" width=100%">
+						<tbody>
+							<tr>
+								<td width="80%">
+									<label for="maxBarbVillages">
+										${tt('Maximum villages to show on the table')}
+									</label>
+								</td>
+								<td width="30%">
+									<input type="text" name="max_barb_villages" id="maxBarbVillages" value="${MAX_BARBARIANS}" />
+								</td>
+							</tr>
+							<tr>
+								<td width="80%">
+									<label for="maxFApages">
+										${tt('Maximum FA Pages to fetch')}
+									</label>
+								</td>
+								<td width="30%">
+									<input type="text" name="max_fa_pages" id="maxFApages" value="${MAX_FA_PAGES_TO_FETCH}" />
+								</td>
+							</tr>
+						</tbody>
+					</table>
+				</div>
+				<div class="ra-popup-footer">
+					<a href="javascript:void(0);" id="saveSettingsBtn" class="btn btn-confirm-yes">
+						${tt('Save Settings')}
+					</a>
+				</div>
+			</div>
+		`;
+
+        Dialog.show('SettingsPanel', content);
+
+        saveSettings();
+    });
+}
+
+// Action Handlers: Save Settings
+function saveSettings() {
+    jQuery('#saveSettingsBtn').off('click').on('click', function (e) {
+        e.preventDefault();
+
+        const maxBarbVillages = jQuery('#maxBarbVillages').val();
+        const maxFApages = jQuery('#maxFApages').val();
+
+        const data = {
+            MAX_BARBARIANS: maxBarbVillages,
+            MAX_FA_PAGES_TO_FETCH: maxFApages,
+        };
+
+        writeStorage(data, readStorage(DEFAULT_STATE));
+        UI.SuccessMessage(tt('Settings saved!'), 1000);
+
+        // Update UI to reflect new settings
+        initClearBarbarianWalls(data);
+    });
+}
+
+// Build barbs table
+function buildBarbsTable(villages, maxBarbsToShow) {
+    villages = villages.slice(0, maxBarbsToShow);
+
+    let barbsTable = `
+		<table class="ra-table" width="100%">
+			<thead>
+				<tr>
+					<th>
+						#
+					</th>
+					<th>
+						${tt('Type')}
+					</th>
+					<th>
+						${tt('Barbarian')}
+					</th>
+					<th>
+						${tt('Report')}
+					</th>
+					<th>
+						${tt('Distance')}
+					</th>
+					<th>
+						${tt('Wall')}
+					</th>
+					<th>
+						${tt('Last Attack Time')}
+					</th>
+					<th>
+						${tt('Actions')}
+					</th>
+				</tr>
+			</thead>
+			<tbody>
+	`;
+
+    villages.forEach((village, index) => {
+        index++; // update index so it starts at 1 instead of 0
+        const { villageId, coord, wall, reportId, reportTime, type, distance } =
+            village;
+
+        const unitsToSend = calculateUnitsToSend(wall);
+
+        if (!unitsToSend) {
+            return;
+        }
+
+        const villageUrl = `${game_data.link_base_pure}info_village&id=${villageId}`;
+        const reportUrl = `${game_data.link_base_pure}report&mode=all&view=${reportId}`;
+        const commandUrl = `${game_data.link_base_pure}place&target=${villageId}${unitsToSend}&wall=${wall}`;
+
+        barbsTable += `
+			<tr data-target-id="${villageId}" data-target-coord="${coord}" data-wall="${wall}">
+				<td>
+					${index}
+				</td>
+				<td>
+					<img src="${type}">
+				</td>
+				<td>
+					<a href="${villageUrl}" target="_blank" rel="noopener noreferrer">
+						${coord}
+					</a>
+				</td>
+				<td>
+					<a href="${reportUrl}" target="_blank" rel="noopener noreferrer">
+						<span class="icon header new_report"></span>
+					</a>
+				</td>
+				<td>
+					${distance}
+				</td>
+				<td>
+					${wall}
+				</td>
+				<td>
+					${reportTime}
+				</td>
+				<td>
+					<a href="${commandUrl}"
+                       data-command-url="${commandUrl}"
+                       data-target-id="${villageId}"
+                       data-target-coord="${coord}"
+                       data-wall="${wall}"
+                       class="ra-clear-barb-wall-btn btn"
+                       target="_blank"
+                       rel="noopener noreferrer">
+						${tt('Attack')}
+					</a>
+				</td>
+			</tr>
+		`;
+    });
+
+    barbsTable += `
+			</tbody>
+		</table>
+	`;
+
+    return barbsTable;
+}
+
+// Action Handler: Highlight Opened Commands
+function highlightOpenedCommands(element) {
+    element.classList.add('btn-confirm-yes');
+    element.classList.add('btn-already-sent');
+    element.parentElement.parentElement.classList.add('already-sent-command');
+}
+
+// Helper: Bind background attack handlers
+function bindAttackEventHandlers() {
+    jQuery('.ra-clear-barb-wall-btn')
+        .off('click.raClearBarbWalls')
+        .on('click.raClearBarbWalls', function (e) {
+            e.preventDefault();
+            sendBackgroundAttack(jQuery(this));
+        });
+
+    jQuery(document)
+        .off('keydown.raClearBarbWalls')
+        .on('keydown.raClearBarbWalls', function (event) {
+            const code = event.keyCode || event.which;
+            const tagName = (event.target && event.target.tagName
+                ? event.target.tagName
+                : ''
+            ).toLowerCase();
+
+            if (code !== 13) return;
+            if (tagName === 'input' || tagName === 'textarea' || tagName === 'select') {
+                return;
+            }
+
+            event.preventDefault();
+
+            if (!BACKGROUND_ATTACK_STATE.enterHeld) {
+                BACKGROUND_ATTACK_STATE.enterHeld = true;
+                BACKGROUND_ATTACK_STATE.stopReason = null;
+                processEnterHoldQueue();
+            }
+        });
+
+    jQuery(document)
+        .off('keyup.raClearBarbWalls')
+        .on('keyup.raClearBarbWalls', function (event) {
+            const code = event.keyCode || event.which;
+            if (code === 13) {
+                BACKGROUND_ATTACK_STATE.enterHeld = false;
+            }
+        });
+}
+
+// Helper: Process continuous enter-hold sending
+async function processEnterHoldQueue() {
+    if (BACKGROUND_ATTACK_STATE.enterLoopRunning) return;
+
+    BACKGROUND_ATTACK_STATE.enterLoopRunning = true;
+
+    try {
+        while (BACKGROUND_ATTACK_STATE.enterHeld) {
+            if (BACKGROUND_ATTACK_STATE.attackBusy) {
+                await sleep(40);
+                continue;
+            }
+
+            const $nextButton = getNextAttackButton();
+            if (!$nextButton.length) {
+                BACKGROUND_ATTACK_STATE.enterHeld = false;
+                break;
+            }
+
+            const success = await sendBackgroundAttack($nextButton);
+            if (!success) {
+                BACKGROUND_ATTACK_STATE.enterHeld = false;
+                break;
+            }
+
+            await sleep(25);
+        }
+    } finally {
+        BACKGROUND_ATTACK_STATE.enterLoopRunning = false;
+    }
+}
+
+// Helper: Get next attack button
+function getNextAttackButton() {
+    return jQuery('.ra-clear-barb-wall-btn').filter(':visible').first();
+}
+
+// Helper: Main background attack flow
+async function sendBackgroundAttack($button) {
+    if (!$button || !$button.length) return false;
+    if (BACKGROUND_ATTACK_STATE.attackBusy) return false;
+
+    if (typeof Accountmanager === 'undefined') {
+        window.Accountmanager = {};
+    }
+    if (typeof Accountmanager.farm === 'undefined') {
+        Accountmanager.farm = {};
+    }
+
+    const elapsed = typeof Timing !== 'undefined' && Timing.getElapsedTimeSinceLoad
+        ? Timing.getElapsedTimeSinceLoad()
+        : Date.now();
+
+    if (
+        Accountmanager.farm.last_click &&
+        elapsed - Accountmanager.farm.last_click < 200
+    ) {
+        return false;
+    }
+
+    Accountmanager.farm.last_click = elapsed;
+    BACKGROUND_ATTACK_STATE.attackBusy = true;
+
+    const $row = $button.closest('tr');
+    const targetCoord = $button.data('target-coord');
+    const commandUrl = $button.data('command-url');
+
+    try {
+        $button.addClass('is-sending');
+        $button.text('Sending');
+
+        const placeHtml = await requestPage(commandUrl, 'GET');
+        const placeDoc = htmlToDocument(placeHtml);
+        const $placeDoc = jQuery(placeDoc);
+
+        const placeForm = findPlaceCommandForm($placeDoc);
+        if (!placeForm.length) {
+            throw new Error('Place form not found.');
+        }
+
+        const placeSubmit = findAttackSubmit(placeForm);
+        if (!placeSubmit.length) {
+            throw new Error('Attack submit button not found on place page.');
+        }
+
+        const placeAction = getAbsoluteFormAction(placeForm);
+        const placePayload = serializeFormWithSubmit(placeForm, placeSubmit);
+
+        const confirmHtml = await requestPage(placeAction, 'POST', placePayload.toString());
+        const confirmDoc = htmlToDocument(confirmHtml);
+        const $confirmDoc = jQuery(confirmDoc);
+
+        const confirmError = extractErrorMessage($confirmDoc);
+        if (confirmError) {
+            throw new Error(confirmError);
+        }
+
+        const confirmForm = findConfirmForm($confirmDoc);
+        if (!confirmForm.length) {
+            throw new Error('Confirm form not found.');
+        }
+
+        const confirmSubmit = findConfirmSubmit(confirmForm);
+        if (!confirmSubmit.length) {
+            throw new Error('Final confirm button not found.');
+        }
+
+        const confirmAction = getAbsoluteFormAction(confirmForm);
+        const confirmPayload = serializeFormWithSubmit(confirmForm, confirmSubmit);
+
+        const finalHtml = await requestPage(
+            confirmAction,
+            'POST',
+            confirmPayload.toString()
+        );
+        const finalDoc = htmlToDocument(finalHtml);
+        const $finalDoc = jQuery(finalDoc);
+
+        const finalError = extractErrorMessage($finalDoc);
+        const stillOnConfirm = findConfirmForm($finalDoc).length > 0;
+
+        if (finalError) {
+            throw new Error(finalError);
+        }
+
+        if (stillOnConfirm) {
+            throw new Error('Attack remained on confirm screen.');
+        }
+
+        handleSuccessfulAttack($button, targetCoord);
+        return true;
+    } catch (error) {
+        handleFailedAttack($button, targetCoord, error);
+        return false;
+    } finally {
+        BACKGROUND_ATTACK_STATE.attackBusy = false;
+    }
+}
+
+// Helper: On success
+function handleSuccessfulAttack($button, targetCoord) {
+    const $row = $button.closest('tr');
+
+    $button.removeClass('is-sending is-error');
+    $button.addClass('btn-confirm-yes');
+    $row.addClass('already-sent-command');
+
+    UI.SuccessMessage(`Attack sent: ${targetCoord}`);
+
+    $row.remove();
+    updateRemainingBarbarianCount();
+}
+
+// Helper: On failure
+function handleFailedAttack($button, targetCoord, error) {
+    const $row = $button.closest('tr');
+    const message =
+        error && error.message ? error.message : 'Unknown background send error.';
+
+    $button.removeClass('is-sending');
+    $button.addClass('is-error');
+    $button.text(tt('Attack'));
+    $row.addClass('ra-row-error');
+
+    BACKGROUND_ATTACK_STATE.stopReason = message;
+
+    UI.ErrorMessage(`Attack failed for ${targetCoord}: ${message}`);
+    console.error(`${scriptInfo()} Background attack failed for ${targetCoord}:`, error);
+}
+
+// Helper: Update remaining count
+function updateRemainingBarbarianCount() {
+    const count = jQuery('.ra-clear-barb-wall-btn').length;
+    jQuery('#barbVillagesCount').text(count);
+}
+
+// Helper: Find place command form
+function findPlaceCommandForm($doc) {
+    return $doc.find('form#command-data-form, form[name="units"]').first();
+}
+
+// Helper: Find place attack submit
+function findAttackSubmit($form) {
+    let $submit = $form.find('input[name="attack"], button[name="attack"]').first();
+
+    if (!$submit.length) {
+        $submit = $form.find('#command_actions input.btn-attack[name], #command_actions button.btn-attack[name]').first();
+    }
+
+    if (!$submit.length) {
+        $submit = $form.find('input[type="submit"][value*="Attack"], input[type="submit"][value*="attack"]').first();
+    }
+
+    return $submit;
+}
+
+// Helper: Find confirm form
+function findConfirmForm($doc) {
+    let $form = $doc
+        .find('form')
+        .filter(function () {
+            return jQuery(this).find('input[name="submit_confirm"], button[name="submit_confirm"]').length > 0;
+        })
+        .first();
+
+    return $form;
+}
+
+// Helper: Find confirm submit
+function findConfirmSubmit($form) {
+    return $form.find('input[name="submit_confirm"], button[name="submit_confirm"]').first();
+}
+
+// Helper: Convert HTML string to document
+function htmlToDocument(html) {
+    return new DOMParser().parseFromString(html, 'text/html');
+}
+
+// Helper: Decode HTML entities
+function decodeHtmlEntities(value) {
+    return jQuery('<textarea/>').html(value || '').text();
+}
+
+// Helper: Get absolute form action
+function getAbsoluteFormAction($form) {
+    const rawAction = $form.attr('action') || '';
+    return new URL(decodeHtmlEntities(rawAction), window.location.origin).toString();
+}
+
+// Helper: Serialize form with clicked submit
+function serializeFormWithSubmit($form, $submit) {
+    const params = new URLSearchParams();
+
+    $form.find('input, select, textarea').each(function () {
+        const el = this;
+        const $el = jQuery(el);
+        const name = $el.attr('name');
+
+        if (!name || el.disabled) return;
+
+        const tagName = (el.tagName || '').toLowerCase();
+        const type = (($el.attr('type') || '') + '').toLowerCase();
+
+        if (type === 'submit' || type === 'button' || type === 'image' || type === 'file') {
+            return;
+        }
+
+        if ((type === 'checkbox' || type === 'radio') && !el.checked) {
+            return;
+        }
+
+        if (tagName === 'select' && el.multiple) {
+            jQuery(el)
+                .find('option:selected')
+                .each(function () {
+                    params.append(name, jQuery(this).val());
+                });
+            return;
+        }
+
+        params.append(name, $el.val());
+    });
+
+    if ($submit && $submit.length) {
+        const submitName = $submit.attr('name');
+        if (submitName) {
+            params.append(submitName, $submit.val() || '1');
+        }
+    }
+
+    return params;
+}
+
+// Helper: Extract page error
+function extractErrorMessage($doc) {
+    const selectors = [
+        '.error_box',
+        '.error',
+        '#error',
+        '.warning',
+        '.warn_box',
+    ];
+
+    for (let i = 0; i < selectors.length; i++) {
+        const $node = $doc.find(selectors[i]).first();
+        const text = $node.text().replace(/\s+/g, ' ').trim();
+        if (text) {
+            return text;
+        }
+    }
+
+    return '';
+}
+
+// Helper: Request page
+async function requestPage(url, method, body) {
+    const options = {
+        method: method || 'GET',
+        credentials: 'same-origin',
+        headers: {},
+    };
+
+    if (method === 'POST') {
+        options.headers['Content-Type'] =
+            'application/x-www-form-urlencoded; charset=UTF-8';
+        options.body = body || '';
+    }
+
+    const response = await fetch(url, options);
+    return await response.text();
+}
+
+// Helper: Sleep
+function sleep(ms) {
+    return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+// Helper: Get FA pages URLs for AJAX
+async function fetchFAPages(maxFAPagesToFetch) {
+    const faPageURLs = await jQuery
+        .get(game_data.link_base_pure + 'am_farm')
+        .then((response) => {
+            const htmlDoc = jQuery.parseHTML(response);
+            const plunderListNav = jQuery(htmlDoc).find(
+                '#plunder_list_nav:eq(0) a'
+            );
+            const firstFApage =
+                game_data.link_base_pure +
+                `am_farm&ajax=page_entries&Farm_page=0&class=&extended=1`;
+
+            // Getting amount of LA pages
+            const faPageURLs = [firstFApage];
+            jQuery(plunderListNav).each(function (index) {
+                index++;
+                if (index <= maxFAPagesToFetch - 1) {
+                    const currentPageNumber = parseInt(
+                        getParameterByName(
+                            'Farm_page',
+                            window.location.origin + jQuery(this).attr('href')
+                        ),
+                        10
+                    );
+                    faPageURLs.push(
+                        game_data.link_base_pure +
+                            `am_farm&ajax=page_entries&Farm_page=${currentPageNumber}&class=&extended=1&order=distance&dir=asc`
+                    );
+                }
+            });
+
+            return faPageURLs;
+        })
+        .catch((error) => {
+            UI.ErrorMessage('Error fetching FA page!');
+            console.error(`${scriptInfo()} Error:`, error);
+        });
+
+    return faPageURLs;
+}
+
+// Helper: Get FA table rows for all pages
+function getFATableRows(pages) {
+    let barbariansText = '';
+    pages.forEach((page) => {
+        barbariansText += page;
+    });
+    return jQuery.parseHTML(barbariansText);
+}
+
+// Helper: Get barbarian villages with known wall level between 1 and 15
+function getFABarbarians(rows) {
+    let barbarians = [];
+
+    rows.forEach((row) => {
+        let shouldAdd = false;
+
+        let villageId = parseInt(
+            getParameterByName(
+                'target',
+                window.location.origin +
+                    jQuery(row).find('td').last().find('a').attr('href')
+            ),
+            10
+        );
+        let coordMatch = jQuery(row)
+            .find('td:eq(3) a')
+            .text()
+            .match(COORDS_REGEX);
+        let coord = coordMatch ? coordMatch[0] : null;
+        let wall = jQuery(row).find('td:eq(6)').text().trim();
+        let wallLevel = parseInt(wall, 10);
+        let distance = jQuery(row).find('td:eq(7)').text().trim();
+        let reportId = parseInt(
+            getParameterByName(
+                'view',
+                window.location.origin +
+                    jQuery(row).find('td:eq(3) a').attr('href')
+            ),
+            10
+        );
+        let reportTime = jQuery(row).find('td:eq(4)').text().trim();
+        let type = jQuery(row).find('td:eq(1) img').attr('src');
+
+        if (
+            coord &&
+            !Number.isNaN(wallLevel) &&
+            wallLevel >= 1 &&
+            wallLevel <= MAX_SUPPORTED_WALL &&
+            calculateUnitsToSend(wallLevel) !== null
+        ) {
+            shouldAdd = true;
+        }
+
+        if (shouldAdd) {
+            barbarians.push({
+                villageId: villageId,
+                coord: coord,
+                distance: distance,
+                wall: wallLevel,
+                reportId: reportId,
+                reportTime: reportTime,
+                type: type,
+            });
+        }
+    });
+
+    return barbarians;
+}
+
+// Helper: Calculate units to send based on wall level
+function calculateUnitsToSend(wall) {
+    let wallToUnitAmounts = UNITS_TO_SEND;
+    let wallLevel = parseInt(wall, 10);
+
+    if (wallToUnitAmounts[wallLevel] !== undefined) {
+        return wallToUnitAmounts[wallLevel];
+    } else {
+        return null;
+    }
+}
+
+// Helper: Make consecutive AJAX (GET) requests
+$.fetchAll = function (
+    urls, // array of URLs
+    onLoad, // called when any URL is loaded, params (index, data)
+    onDone, // called when all URLs successfully loaded, no params
+    onError // called when a URL load fails or if onLoad throws an exception, params (error)
+) {
+    var numDone = 0;
+    var lastRequestTime = 0;
+    var minWaitTime = 250; // ms between requests
+    loadNext();
+
+    function loadNext() {
+        if (numDone == urls.length) {
+            onDone();
+            return;
+        }
+
+        let now = Date.now();
+        let timeElapsed = now - lastRequestTime;
+        if (timeElapsed < minWaitTime) {
+            let timeRemaining = minWaitTime - timeElapsed;
+            setTimeout(loadNext, timeRemaining);
+            return;
+        }
+
+        lastRequestTime = now;
+        $.get(urls[numDone])
+            .done((data) => {
+                try {
+                    onLoad(numDone, data);
+                    ++numDone;
+                    loadNext();
+                } catch (e) {
+                    onError(e);
+                }
+            })
+            .fail((xhr) => {
+                onError(xhr);
+            });
+    }
+};
+
+// Helper: Progress bar UI
+function startProgressBar(total) {
+    const width = jQuery('#contentContainer')[0].clientWidth;
+    const preloaderContent = `
+		<div id="progressbar" class="progress-bar" style="margin-bottom:12px;">
+        	<span class="count label">0/${total}</span>
+        	<div id="progress">
+				<span class="count label" style="width: ${width}px;">
+					0/${total}
+				</span>
+			</div>
+    	</div>
+	`;
+    jQuery('#contentContainer').eq(0).prepend(preloaderContent);
+}
+
+// Helper: Updates progress bar
+function updateProgressBar(index, total) {
+    jQuery('#progress').css('width', `${((index + 1) / total) * 100}%`);
+    jQuery('.count').text(`${tt('Fetching')} ${index + 1}/${total}`);
+    if (index + 1 == total) {
+        UI.SuccessMessage(tt('Finished fetching FA pages!'));
+        jQuery('#progressbar').fadeOut(1000);
+    }
+}
+
+// Helper: Read client-side storage
+function readStorage(defaultState) {
+    let storedState = sessionStorage.getItem(STORAGE_KEY);
+    if (!storedState) return defaultState;
+    if (typeof storedState === 'object') return defaultState;
+    storedState = JSON.parse(storedState);
+    return storedState;
+}
+
+// Helper: Write into client-side storage
+function writeStorage(data, initialState) {
+    const dataToBeSaved = {
+        ...initialState,
+        ...data,
+    };
+    sessionStorage.setItem(STORAGE_KEY, JSON.stringify(dataToBeSaved));
+}
+
+// Helper: Get parameter by name
+function getParameterByName(name, url = window.location.href) {
+    return new URL(url).searchParams.get(name);
+}
+
+// Helper: Generates script info
+function scriptInfo() {
+    return `[${scriptData.name} ${scriptData.version}]`;
+}
+
+// Helper: Prints universal debug information
+function initDebug() {
+    console.debug(`${scriptInfo()} It works 🚀!`);
+    console.debug(`${scriptInfo()} HELP:`, scriptData.helpLink);
+    if (DEBUG) {
+        console.debug(`${scriptInfo()} Market:`, game_data.market);
+        console.debug(`${scriptInfo()} World:`, game_data.world);
+        console.debug(`${scriptInfo()} Screen:`, game_data.screen);
+        console.debug(`${scriptInfo()} Game Version:`, game_data.majorVersion);
+        console.debug(`${scriptInfo()} Game Build:`, game_data.version);
+        console.debug(`${scriptInfo()} Locale:`, game_data.locale);
+        console.debug(
+            `${scriptInfo()} Premium:`,
+            game_data.features.Premium.active
+        );
+    }
+}
+
+// Helper: Text Translator
+function tt(string) {
+    var gameLocale = game_data.locale;
+
+    if (translations[gameLocale] !== undefined) {
+        return translations[gameLocale][string];
+    } else {
+        return translations['en_DK'][string];
+    }
+}
+
+// Initialize Script
+(function () {
+    if (
+        game_data.features.FarmAssistent.active &&
+        game_data.features.Premium.active
+    ) {
+        const gameScreen = getParameterByName('screen');
+        if (ALLOWED_GAME_SCREENS.includes(gameScreen)) {
+            const state = readStorage(DEFAULT_STATE);
+            initClearBarbarianWalls(state);
+        } else {
+            UI.InfoMessage(tt('Redirecting...'));
+            window.location.assign(game_data.link_base_pure + 'map');
+        }
+    } else {
+        UI.ErrorMessage(tt('This script requires PA and FA to be active!'));
+    }
+})();
